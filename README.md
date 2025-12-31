@@ -18,6 +18,27 @@ npm run dev -- --path /
 On Windows, the default (no `--path`) shows drive roots (e.g. `C:\`).
 On macOS, the default (no `--path`) starts at `/Volumes`.
 
+## Run from GitHub (no clone)
+
+Using npx:
+
+```sh
+npx -y github:fumiya-kume/neostorage
+```
+
+Using bun:
+
+```sh
+bunx github:fumiya-kume/neostorage
+```
+
+Optional root path:
+
+```sh
+npx -y github:fumiya-kume/neostorage -- --path /
+bunx github:fumiya-kume/neostorage -- --path /
+```
+
 ## Controls
 
 - Up/Down: move selection

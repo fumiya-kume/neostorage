@@ -3,6 +3,9 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { isDriveRoot, listWindowsDrives } from './drives.js';
 
+const DU_BATCH_SIZE = 50;
+const FILE_BATCH_SIZE = 200;
+
 function execDu(args) {
   return new Promise((resolve, reject) => {
     const proc = spawn('du', args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -70,6 +73,33 @@ function parseWarnings(stderr) {
   return warnings;
 }
 
+function parseDuOutput(stdout) {
+  const sizeMap = new Map();
+  const lines = stdout.split('\n');
+  for (const line of lines) {
+    if (!line) {
+      continue;
+    }
+    const match = line.match(/^(\d+)\s+(.*)$/);
+    if (!match) {
+      continue;
+    }
+    sizeMap.set(match[2], Number(match[1]));
+  }
+  return sizeMap;
+}
+
+function chunkEntries(entries, size) {
+  if (entries.length <= size) {
+    return [entries];
+  }
+  const chunks = [];
+  for (let i = 0; i < entries.length; i += size) {
+    chunks.push(entries.slice(i, i + size));
+  }
+  return chunks;
+}
+
 export async function getEntrySizeKb(fullPath, isDir) {
   if (!isDir) {
     try {
@@ -96,4 +126,89 @@ export async function getEntrySizeKb(fullPath, isDir) {
   }
   const sizeKb = Number(match[1]);
   return { sizeKb, warnings };
+}
+
+export async function getEntriesSizeKb(entries, rootPath = null) {
+  const warnings = [];
+  const sizeMap = new Map();
+  let pendingEntries = entries;
+
+  if (process.platform === 'darwin' && rootPath) {
+    try {
+      const result = await execDu(['-k', '-d', '1', '-x', rootPath]);
+      warnings.push(...parseWarnings(result.stderr));
+      const parsed = parseDuOutput(result.stdout);
+      const missing = [];
+      for (const entry of entries) {
+        const sizeKb = parsed.get(entry.fullPath);
+        if (sizeKb === undefined) {
+          missing.push(entry);
+          continue;
+        }
+        sizeMap.set(entry.fullPath, sizeKb);
+      }
+      pendingEntries = missing;
+      if (!pendingEntries.length) {
+        return { sizeMap, warnings };
+      }
+    } catch (error) {
+      warnings.push(`du failed: ${error.message}`);
+    }
+  }
+
+  const fileEntries = pendingEntries.filter((entry) => !entry.isDir);
+  const dirEntries = pendingEntries.filter((entry) => entry.isDir);
+
+  if (fileEntries.length) {
+    const chunks = chunkEntries(fileEntries, FILE_BATCH_SIZE);
+    for (const chunk of chunks) {
+      const results = await Promise.all(
+        chunk.map(async (entry) => {
+          try {
+            const stat = await fs.stat(entry.fullPath);
+            return { entry, sizeKb: Math.ceil(stat.size / 1024), warning: null };
+          } catch (error) {
+            return {
+              entry,
+              sizeKb: null,
+              warning: `Stat failed: ${entry.fullPath}: ${error.message}`
+            };
+          }
+        })
+      );
+      for (const result of results) {
+        if (result.warning) {
+          warnings.push(result.warning);
+        }
+        if (result.sizeKb !== null && result.sizeKb !== undefined) {
+          sizeMap.set(result.entry.fullPath, result.sizeKb);
+        }
+      }
+    }
+  }
+
+  if (dirEntries.length) {
+    const chunks = chunkEntries(dirEntries, DU_BATCH_SIZE);
+    for (const chunk of chunks) {
+      let result;
+      try {
+        result = await execDu(['-s', '-k', ...chunk.map((entry) => entry.fullPath)]);
+      } catch (error) {
+        warnings.push(`du failed: ${error.message}`);
+        continue;
+      }
+      warnings.push(...parseWarnings(result.stderr));
+      const parsed = parseDuOutput(result.stdout);
+      for (const entry of chunk) {
+        const sizeKb = parsed.get(entry.fullPath);
+        if (sizeKb === undefined) {
+          warnings.push(`du missing output: ${entry.fullPath}`);
+          continue;
+        }
+        sizeMap.set(entry.fullPath, sizeKb);
+      }
+    }
+  }
+
+  return { sizeMap, warnings };
 }

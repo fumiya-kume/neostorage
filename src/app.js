@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
-import { getEntrySizeKb, listDirectChildren } from './du.js';
+import { getEntriesSizeKb, listDirectChildren } from './du.js';
 import { formatRootLabel } from './drives.js';
 import {
   formatPercent,
@@ -17,7 +17,6 @@ const HEADER_HEIGHT = 1;
 const FOOTER_HEIGHT = 1;
 const DETAILS_HEIGHT = 5;
 const MIN_LIST_HEIGHT = 4;
-const MAX_CONCURRENT = 3;
 
 function getVisibleRange(total, selected, height) {
   if (total <= height) {
@@ -63,10 +62,9 @@ export default function App({ rootPath }) {
   const [statusMessage, setStatusMessage] = useState('');
   const [history, setHistory] = useState([]);
   const loadIdRef = useRef(0);
+  const scanIdRef = useRef(0);
   const selectedPathRef = useRef(null);
   const sizeCacheRef = useRef(new Map());
-  const inflightRef = useRef(new Set());
-  const queueRef = useRef([]);
 
   const updateEntries = useCallback((nextEntries, keepSelectionPath = null) => {
     const sorted = sortEntries(nextEntries);
@@ -84,25 +82,32 @@ export default function App({ rootPath }) {
     setSelectedIndex(nextIndex);
   }, []);
 
-  function updateLoadingState(requestId) {
-    if (loadIdRef.current !== requestId) {
+  const applySizes = useCallback((sizeMap) => {
+    if (!sizeMap || sizeMap.size === 0) {
       return;
     }
-    const hasWork =
-      inflightRef.current.size > 0 || queueRef.current.length > 0;
-    setIsLoading(hasWork);
-  }
-
-  function applySize(fullPath, sizeKb) {
-    if (sizeKb === null || sizeKb === undefined) {
-      return;
+    const sizeGbMap = new Map();
+    for (const [fullPath, sizeKb] of sizeMap.entries()) {
+      const sizeGb = kbToGb(sizeKb);
+      sizeGbMap.set(fullPath, sizeGb);
+      sizeCacheRef.current.set(fullPath, sizeGb);
     }
-    const sizeGb = kbToGb(sizeKb);
-    sizeCacheRef.current.set(fullPath, sizeGb);
     setEntries((prev) => {
-      const updated = prev.map((entry) =>
-        entry.fullPath === fullPath ? { ...entry, sizeGb } : entry
-      );
+      let changed = false;
+      const updated = prev.map((entry) => {
+        const sizeGb = sizeGbMap.get(entry.fullPath);
+        if (sizeGb === undefined) {
+          return entry;
+        }
+        if (entry.sizeGb === sizeGb) {
+          return entry;
+        }
+        changed = true;
+        return { ...entry, sizeGb };
+      });
+      if (!changed) {
+        return prev;
+      }
       const sorted = sortEntries(updated);
       const selectedPath = selectedPathRef.current;
       if (selectedPath) {
@@ -115,59 +120,56 @@ export default function App({ rootPath }) {
       }
       return sorted;
     });
-  }
+  }, []);
 
-  function drainQueue(requestId) {
-    if (loadIdRef.current !== requestId) {
-      return;
-    }
-    while (
-      inflightRef.current.size < MAX_CONCURRENT &&
-      queueRef.current.length > 0
-    ) {
-      const entry = queueRef.current.shift();
-      if (!entry) {
-        continue;
+  const scanSizes = useCallback(
+    async (targetPath, targetEntries, requestId) => {
+      if (!targetEntries.length) {
+        if (loadIdRef.current === requestId) {
+          setIsLoading(false);
+        }
+        return;
       }
-      inflightRef.current.add(entry.fullPath);
-      updateLoadingState(requestId);
-      getEntrySizeKb(entry.fullPath, entry.isDir)
-        .then((result) => {
-          if (loadIdRef.current !== requestId) {
-            return;
-          }
-          if (result?.warnings?.length) {
-            setWarnings((prev) => [...prev, ...result.warnings]);
-          }
-          applySize(entry.fullPath, result?.sizeKb ?? null);
-        })
-        .catch((error) => {
-          if (loadIdRef.current !== requestId) {
-            return;
-          }
-          setWarnings((prev) => [
-            ...prev,
-            `Size failed: ${entry.fullPath}: ${error.message}`
-          ]);
-        })
-        .finally(() => {
-          if (loadIdRef.current !== requestId) {
-            return;
-          }
-          inflightRef.current.delete(entry.fullPath);
-          updateLoadingState(requestId);
-          drainQueue(requestId);
-        });
-    }
-  }
+      const scanId = scanIdRef.current + 1;
+      scanIdRef.current = scanId;
+      setIsLoading(true);
+      try {
+        const result = await getEntriesSizeKb(targetEntries, targetPath);
+        if (
+          loadIdRef.current !== requestId ||
+          scanIdRef.current !== scanId
+        ) {
+          return;
+        }
+        if (result?.warnings?.length) {
+          setWarnings((prev) => [...prev, ...result.warnings]);
+        }
+        applySizes(result?.sizeMap ?? new Map());
+      } catch (error) {
+        if (
+          loadIdRef.current !== requestId ||
+          scanIdRef.current !== scanId
+        ) {
+          return;
+        }
+        setWarnings((prev) => [...prev, `Size failed: ${error.message}`]);
+      } finally {
+        if (
+          loadIdRef.current === requestId &&
+          scanIdRef.current === scanId
+        ) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [applySizes]
+  );
 
   const refresh = useCallback(
     async (targetPath, keepSelectionPath = null, forceRescan = false) => {
       const requestId = loadIdRef.current + 1;
       loadIdRef.current = requestId;
-      inflightRef.current.clear();
-      queueRef.current = [];
-      updateLoadingState(requestId);
+      setIsLoading(false);
       try {
         const quick = await listDirectChildren(targetPath);
         if (loadIdRef.current !== requestId) {
@@ -184,6 +186,10 @@ export default function App({ rootPath }) {
         });
         updateEntries(quickEntries, keepSelectionPath);
         setWarnings(quick.warnings);
+        const targets = quickEntries.filter(
+          (entry) => entry.sizeGb === null || entry.sizeGb === undefined
+        );
+        scanSizes(targetPath, targets, requestId);
       } catch (error) {
         setEntries([]);
         setWarnings([]);
@@ -195,7 +201,7 @@ export default function App({ rootPath }) {
         }
       }
     },
-    [updateEntries]
+    [scanSizes, updateEntries]
   );
 
   useEffect(() => {
@@ -283,33 +289,6 @@ export default function App({ rootPath }) {
     listBodyHeight
   );
   const visibleEntries = entries.slice(start, end);
-
-  useEffect(() => {
-    const requestId = loadIdRef.current;
-    if (entries.length === 0) {
-      updateLoadingState(requestId);
-      return;
-    }
-    const visibleSet = new Set(
-      entries.slice(start, end).map((entry) => entry.fullPath)
-    );
-    const unsized = entries.filter(
-      (entry) =>
-        (entry.sizeGb === null || entry.sizeGb === undefined) &&
-        !inflightRef.current.has(entry.fullPath)
-    );
-    const visible = [];
-    const rest = [];
-    for (const entry of unsized) {
-      if (visibleSet.has(entry.fullPath)) {
-        visible.push(entry);
-      } else {
-        rest.push(entry);
-      }
-    }
-    queueRef.current = [...visible, ...rest];
-    drainQueue(requestId);
-  }, [entries, start, end]);
 
   const rankWidth = Math.max(3, String(entries.length || 1).length);
   const indicatorWidth = 2;

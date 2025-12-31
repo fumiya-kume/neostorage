@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import React from 'react';
 import { render } from 'ink';
 import App from './app.js';
+import { formatRootLabel, getDefaultRootPath, isDriveRoot } from './drives.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json');
@@ -13,12 +14,13 @@ const args = process.argv.slice(2);
 
 function printHelp() {
   const name = pkg.name || 'neostorage';
+  const defaultLabel = formatRootLabel(getDefaultRootPath());
   console.log(`${name} - storage visualizer`);
   console.log('');
   console.log(`Usage: ${name} [--path <path>]`);
   console.log('');
   console.log('Options:');
-  console.log('  --path, -p   Root path (default: /)');
+  console.log(`  --path, -p   Root path (default: ${defaultLabel})`);
   console.log('  --help, -h   Show help');
   console.log('  --version, -v Show version');
 }
@@ -58,19 +60,23 @@ for (let i = 0; i < args.length; i += 1) {
 }
 
 if (!targetPath) {
-  targetPath = '/';
+  targetPath = getDefaultRootPath();
 }
 
-const resolvedPath = path.resolve(targetPath);
-let stat;
-try {
-  stat = fs.statSync(resolvedPath);
-} catch (error) {
-  exitWithError(`Path not found: ${resolvedPath}`);
-}
+const resolvedPath = isDriveRoot(targetPath)
+  ? targetPath
+  : path.resolve(targetPath);
+if (!isDriveRoot(resolvedPath)) {
+  let stat;
+  try {
+    stat = fs.statSync(resolvedPath);
+  } catch (error) {
+    exitWithError(`Path not found: ${resolvedPath}`);
+  }
 
-if (!stat.isDirectory()) {
-  exitWithError(`Not a directory: ${resolvedPath}`);
+  if (!stat.isDirectory()) {
+    exitWithError(`Not a directory: ${resolvedPath}`);
+  }
 }
 
 render(React.createElement(App, { rootPath: resolvedPath }));

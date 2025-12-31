@@ -15,6 +15,9 @@ Optional root path:
 npm run dev -- --path /
 ```
 
+On Windows, the default (no `--path`) shows drive roots (e.g. `C:\`).
+On macOS, the default (no `--path`) starts at `/Volumes`.
+
 ## Controls
 
 - Up/Down: move selection

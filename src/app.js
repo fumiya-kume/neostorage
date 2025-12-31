@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { getEntrySizeKb, listDirectChildren } from './du.js';
+import { formatRootLabel } from './drives.js';
 import {
   formatPercent,
   formatSizeGb,
@@ -318,7 +319,10 @@ export default function App({ rootPath }) {
     columns - rankWidth - indicatorWidth - sizeWidth - 3
   );
 
-  const headerPath = truncateMiddle(`📂 Path: ${currentPath}`, columns);
+  const headerPath = truncateMiddle(
+    `📂 Path: ${formatRootLabel(currentPath)}`,
+    columns
+  );
   const warningCount = getWarningCount(warnings);
   const timeLabel = lastRefreshAt
     ? lastRefreshAt.toLocaleTimeString('en-US', {

@@ -7,7 +7,13 @@ export function isDriveRoot(targetPath) {
 }
 
 export function getDefaultRootPath() {
-  return process.platform === 'win32' ? DRIVE_ROOT : '/';
+  if (process.platform === 'win32') {
+    return DRIVE_ROOT;
+  }
+  if (process.platform === 'darwin') {
+    return '/Volumes';
+  }
+  return '/';
 }
 
 export function formatRootLabel(targetPath) {

@@ -6,7 +6,26 @@ import { isDriveRoot, listWindowsDrives } from './drives.js';
 const DU_BATCH_SIZE = 50;
 const FILE_BATCH_SIZE = 200;
 
-function execDu(args) {
+type DuResult = {
+  stdout: string;
+  stderr: string;
+  code: number | null;
+};
+
+export type Entry = {
+  fullPath: string;
+  name: string;
+  isDir: boolean;
+};
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function execDu(args: string[]): Promise<DuResult> {
   return new Promise((resolve, reject) => {
     const proc = spawn('du', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
@@ -30,7 +49,9 @@ function execDu(args) {
   });
 }
 
-export async function listDirectChildren(rootPath) {
+export async function listDirectChildren(
+  rootPath: string
+): Promise<{ entries: Entry[]; warnings: string[] }> {
   if (isDriveRoot(rootPath)) {
     const drives = await listWindowsDrives();
     return {
@@ -42,8 +63,8 @@ export async function listDirectChildren(rootPath) {
       warnings: []
     };
   }
-  const entries = [];
-  const warnings = [];
+  const entries: Entry[] = [];
+  const warnings: string[] = [];
   try {
     const dirents = await fs.readdir(rootPath, { withFileTypes: true });
     for (const dirent of dirents) {
@@ -55,13 +76,13 @@ export async function listDirectChildren(rootPath) {
       });
     }
   } catch (error) {
-    warnings.push(`Read dir failed: ${rootPath}: ${error.message}`);
+    warnings.push(`Read dir failed: ${rootPath}: ${getErrorMessage(error)}`);
   }
   return { entries, warnings };
 }
 
-function parseWarnings(stderr) {
-  const warnings = [];
+function parseWarnings(stderr: string): string[] {
+  const warnings: string[] = [];
   const errLines = stderr.split('\n');
   for (const line of errLines) {
     const trimmed = line.trim();
@@ -73,8 +94,8 @@ function parseWarnings(stderr) {
   return warnings;
 }
 
-function parseDuOutput(stdout) {
-  const sizeMap = new Map();
+function parseDuOutput(stdout: string): Map<string, number> {
+  const sizeMap = new Map<string, number>();
   const lines = stdout.split('\n');
   for (const line of lines) {
     if (!line) {
@@ -89,18 +110,21 @@ function parseDuOutput(stdout) {
   return sizeMap;
 }
 
-function chunkEntries(entries, size) {
+function chunkEntries<T>(entries: T[], size: number): T[][] {
   if (entries.length <= size) {
     return [entries];
   }
-  const chunks = [];
+  const chunks: T[][] = [];
   for (let i = 0; i < entries.length; i += size) {
     chunks.push(entries.slice(i, i + size));
   }
   return chunks;
 }
 
-export async function getEntrySizeKb(fullPath, isDir) {
+export async function getEntrySizeKb(
+  fullPath: string,
+  isDir: boolean
+): Promise<{ sizeKb: number | null; warnings: string[] }> {
   if (!isDir) {
     try {
       const stat = await fs.stat(fullPath);
@@ -109,7 +133,7 @@ export async function getEntrySizeKb(fullPath, isDir) {
     } catch (error) {
       return {
         sizeKb: null,
-        warnings: [`Stat failed: ${fullPath}: ${error.message}`]
+        warnings: [`Stat failed: ${fullPath}: ${getErrorMessage(error)}`]
       };
     }
   }
@@ -128,9 +152,12 @@ export async function getEntrySizeKb(fullPath, isDir) {
   return { sizeKb, warnings };
 }
 
-export async function getEntriesSizeKb(entries, rootPath = null) {
-  const warnings = [];
-  const sizeMap = new Map();
+export async function getEntriesSizeKb(
+  entries: Entry[],
+  rootPath: string | null = null
+): Promise<{ sizeMap: Map<string, number>; warnings: string[] }> {
+  const warnings: string[] = [];
+  const sizeMap = new Map<string, number>();
   let pendingEntries = entries;
 
   if (process.platform === 'darwin' && rootPath) {
@@ -138,7 +165,7 @@ export async function getEntriesSizeKb(entries, rootPath = null) {
       const result = await execDu(['-k', '-d', '1', '-x', rootPath]);
       warnings.push(...parseWarnings(result.stderr));
       const parsed = parseDuOutput(result.stdout);
-      const missing = [];
+      const missing: Entry[] = [];
       for (const entry of entries) {
         const sizeKb = parsed.get(entry.fullPath);
         if (sizeKb === undefined) {
@@ -152,7 +179,7 @@ export async function getEntriesSizeKb(entries, rootPath = null) {
         return { sizeMap, warnings };
       }
     } catch (error) {
-      warnings.push(`du failed: ${error.message}`);
+      warnings.push(`du failed: ${getErrorMessage(error)}`);
     }
   }
 
@@ -171,7 +198,7 @@ export async function getEntriesSizeKb(entries, rootPath = null) {
             return {
               entry,
               sizeKb: null,
-              warning: `Stat failed: ${entry.fullPath}: ${error.message}`
+              warning: `Stat failed: ${entry.fullPath}: ${getErrorMessage(error)}`
             };
           }
         })
@@ -194,7 +221,7 @@ export async function getEntriesSizeKb(entries, rootPath = null) {
       try {
         result = await execDu(['-s', '-k', ...chunk.map((entry) => entry.fullPath)]);
       } catch (error) {
-        warnings.push(`du failed: ${error.message}`);
+        warnings.push(`du failed: ${getErrorMessage(error)}`);
         continue;
       }
       warnings.push(...parseWarnings(result.stderr));

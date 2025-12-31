@@ -7,8 +7,13 @@ import { render } from 'ink';
 import App from './app.js';
 import { formatRootLabel, getDefaultRootPath, isDriveRoot } from './drives.js';
 
+type PackageJson = {
+  name?: string;
+  version?: string;
+};
+
 const require = createRequire(import.meta.url);
-const pkg = require('../package.json');
+const pkg = require('../package.json') as PackageJson;
 
 const args = process.argv.slice(2);
 
@@ -25,12 +30,12 @@ function printHelp() {
   console.log('  --version, -v Show version');
 }
 
-function exitWithError(message) {
+function exitWithError(message: string): never {
   console.error(`Error: ${message}`);
   process.exit(1);
 }
 
-let targetPath = null;
+let targetPath: string | null = null;
 for (let i = 0; i < args.length; i += 1) {
   const arg = args[i];
   if (arg === '--help' || arg === '-h') {

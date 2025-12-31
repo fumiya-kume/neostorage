@@ -15,6 +15,13 @@ Optional root path:
 npm run dev -- --path /
 ```
 
+Build and run the compiled CLI:
+
+```sh
+npm run build
+npm start
+```
+
 On Windows, the default (no `--path`) shows drive roots (e.g. `C:\`).
 On macOS, the default (no `--path`) starts at `/Volumes`.
 

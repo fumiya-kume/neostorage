@@ -2,11 +2,11 @@ import fs from 'node:fs/promises';
 
 export const DRIVE_ROOT = '__NEOSTORAGE_DRIVES__';
 
-export function isDriveRoot(targetPath) {
+export function isDriveRoot(targetPath: string): boolean {
   return targetPath === DRIVE_ROOT;
 }
 
-export function getDefaultRootPath() {
+export function getDefaultRootPath(): string {
   if (process.platform === 'win32') {
     return DRIVE_ROOT;
   }
@@ -16,18 +16,18 @@ export function getDefaultRootPath() {
   return '/';
 }
 
-export function formatRootLabel(targetPath) {
+export function formatRootLabel(targetPath: string): string {
   if (isDriveRoot(targetPath)) {
     return 'Drives';
   }
   return targetPath;
 }
 
-export async function listWindowsDrives() {
+export async function listWindowsDrives(): Promise<string[]> {
   if (process.platform !== 'win32') {
     return [];
   }
-  const drives = [];
+  const drives: string[] = [];
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   for (const letter of letters) {
     const root = `${letter}:\\`;

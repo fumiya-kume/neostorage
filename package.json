@@ -4,11 +4,14 @@
   "description": "Minimal Ink storage visualizer",
   "type": "module",
   "bin": {
-    "neostorage": "./src/cli.js"
+    "neostorage": "./dist/cli.js"
   },
   "scripts": {
-    "dev": "node ./src/cli.js",
-    "start": "node ./src/cli.js"
+    "dev": "tsx src/cli.ts",
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build"
   },
   "engines": {
     "node": ">=18"
@@ -16,5 +19,11 @@
   "dependencies": {
     "ink": "^5.0.0",
     "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "@types/react": "^19.2.7",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }

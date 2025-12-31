@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, useApp, useInput, useStdout } from 'ink';
-import { getEntriesSizeKb, listDirectChildren } from './du.js';
+import { Box, Text, type Key, useApp, useInput, useStdout } from 'ink';
+import { getEntriesSizeKb, listDirectChildren, type Entry } from './du.js';
 import { formatRootLabel } from './drives.js';
 import {
   formatPercent,
@@ -18,7 +18,24 @@ const FOOTER_HEIGHT = 1;
 const DETAILS_HEIGHT = 5;
 const MIN_LIST_HEIGHT = 4;
 
-function getVisibleRange(total, selected, height) {
+type EntryWithSize = Entry & { sizeGb: number | null };
+
+type AppProps = {
+  rootPath: string;
+};
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function getVisibleRange(
+  total: number,
+  selected: number,
+  height: number
+): { start: number; end: number } {
   if (total <= height) {
     return { start: 0, end: total };
   }
@@ -31,7 +48,7 @@ function getVisibleRange(total, selected, height) {
   return { start, end: start + height };
 }
 
-function sortEntries(entries) {
+function sortEntries(entries: EntryWithSize[]): EntryWithSize[] {
   return [...entries].sort((a, b) => {
     const aSize = a.sizeGb ?? -1;
     const bSize = b.sizeGb ?? -1;
@@ -45,28 +62,29 @@ function sortEntries(entries) {
   });
 }
 
-function getWarningCount(warnings) {
+function getWarningCount(warnings: string[]): number {
   return warnings.filter((line) => /permission denied/i.test(line)).length;
 }
 
-export default function App({ rootPath }) {
+export default function App({ rootPath }: AppProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const [currentPath, setCurrentPath] = useState(rootPath);
-  const [entries, setEntries] = useState([]);
+  const [currentPath, setCurrentPath] = useState<string>(rootPath);
+  const [entries, setEntries] = useState<EntryWithSize[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [lastRefreshAt, setLastRefreshAt] = useState(null);
-  const [warnings, setWarnings] = useState([]);
+  const [lastRefreshAt, setLastRefreshAt] = useState<Date | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [helpVisible, setHelpVisible] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('');
-  const [history, setHistory] = useState([]);
+  const [statusMessage, setStatusMessage] = useState<string>('');
+  const [history, setHistory] = useState<string[]>([]);
   const loadIdRef = useRef(0);
   const scanIdRef = useRef(0);
-  const selectedPathRef = useRef(null);
-  const sizeCacheRef = useRef(new Map());
+  const selectedPathRef = useRef<string | null>(null);
+  const sizeCacheRef = useRef<Map<string, number>>(new Map());
 
-  const updateEntries = useCallback((nextEntries, keepSelectionPath = null) => {
+  const updateEntries = useCallback(
+    (nextEntries: EntryWithSize[], keepSelectionPath: string | null = null) => {
     const sorted = sortEntries(nextEntries);
     const targetPath = keepSelectionPath ?? selectedPathRef.current;
     let nextIndex = 0;
@@ -80,13 +98,15 @@ export default function App({ rootPath }) {
     }
     setEntries(sorted);
     setSelectedIndex(nextIndex);
-  }, []);
+    },
+    []
+  );
 
-  const applySizes = useCallback((sizeMap) => {
+  const applySizes = useCallback((sizeMap: Map<string, number>) => {
     if (!sizeMap || sizeMap.size === 0) {
       return;
     }
-    const sizeGbMap = new Map();
+    const sizeGbMap = new Map<string, number>();
     for (const [fullPath, sizeKb] of sizeMap.entries()) {
       const sizeGb = kbToGb(sizeKb);
       sizeGbMap.set(fullPath, sizeGb);
@@ -123,7 +143,11 @@ export default function App({ rootPath }) {
   }, []);
 
   const scanSizes = useCallback(
-    async (targetPath, targetEntries, requestId) => {
+    async (
+      targetPath: string,
+      targetEntries: EntryWithSize[],
+      requestId: number
+    ) => {
       if (!targetEntries.length) {
         if (loadIdRef.current === requestId) {
           setIsLoading(false);
@@ -152,7 +176,7 @@ export default function App({ rootPath }) {
         ) {
           return;
         }
-        setWarnings((prev) => [...prev, `Size failed: ${error.message}`]);
+        setWarnings((prev) => [...prev, `Size failed: ${getErrorMessage(error)}`]);
       } finally {
         if (
           loadIdRef.current === requestId &&
@@ -166,7 +190,11 @@ export default function App({ rootPath }) {
   );
 
   const refresh = useCallback(
-    async (targetPath, keepSelectionPath = null, forceRescan = false) => {
+    async (
+      targetPath: string,
+      keepSelectionPath: string | null = null,
+      forceRescan = false
+    ) => {
       const requestId = loadIdRef.current + 1;
       loadIdRef.current = requestId;
       setIsLoading(false);
@@ -194,7 +222,7 @@ export default function App({ rootPath }) {
         setEntries([]);
         setWarnings([]);
         setSelectedIndex(0);
-        setStatusMessage(`Error: ${error.message}`);
+        setStatusMessage(`Error: ${getErrorMessage(error)}`);
       } finally {
         if (loadIdRef.current === requestId) {
           setLastRefreshAt(new Date());
@@ -218,7 +246,7 @@ export default function App({ rootPath }) {
     return () => clearTimeout(timeout);
   }, [statusMessage]);
 
-  useInput((input, key) => {
+  useInput((input: string, key: Key) => {
     if (key.upArrow) {
       if (entries.length === 0) {
         return;
@@ -328,7 +356,7 @@ export default function App({ rootPath }) {
 
   const footerText = truncateEnd(footerParts.join(' | '), columns);
 
-  const detailLines = [];
+  const detailLines: string[] = [];
   if (helpVisible) {
     detailLines.push('Help');
     detailLines.push('  Up/Down : move selection');
@@ -369,7 +397,7 @@ export default function App({ rootPath }) {
     padLeft('Size', sizeWidth)
   ].join(' ');
 
-  const listLines = [];
+  const listLines: React.ReactElement[] = [];
   listLines.push(
     h(Text, { key: 'list-header', dimColor: true }, truncateEnd(headerLine, columns))
   );

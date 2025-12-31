@@ -1,0 +1,20 @@
+{
+  "name": "neostorage",
+  "version": "0.1.0",
+  "description": "Minimal Ink storage visualizer",
+  "type": "module",
+  "bin": {
+    "neostorage": "./src/cli.js"
+  },
+  "scripts": {
+    "dev": "node ./src/cli.js",
+    "start": "node ./src/cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ink": "^5.0.0",
+    "react": "^18.2.0"
+  }
+}
